@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
         std_msgs
         message_generation
         tf2
+        tf2_geometry_msgs
         )
 
 set(EP_SLIC3R "Slic3r")
@@ -22,8 +23,8 @@ ExternalProject_Add(
         ${EP_SLIC3R}
 
         PREFIX ${EP_SLIC3R}
-        GIT_REPOSITORY https://github.com/ClemensElflein/Slic3r
-        GIT_TAG 026c1380e0ad12176dd2fc8cdf8f6f181deeb071
+        GIT_REPOSITORY https://github.com/HoverMower/Slic3r
+        #GIT_TAG 026c1380e0ad12176dd2fc8cdf8f6f181deeb071
         GIT_SHALLOW OFF
 
 
