@@ -2,23 +2,22 @@
 // Created by Clemens Elflein on 27.08.21.
 //
 
-#include "coverage_planner.h"
+#include <coverage_planner.h>
 
 namespace slic3r_coverage_planner
 {
-    ros::Publisher marker_array_publisher;
-
     CoveragePlanner::CoveragePlanner()
     {
-
         marker_array_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("slic3r_coverage_planner/path_marker_array", 100, true);
-        costmap_converter_sub_ = nh_.subscribe("costmap_obstacles", 1, &CoveragePlanner::customObstacleCB, this);
+        costmap_converter_sub_ = nh_.subscribe("/costmap_converter/costmap_obstacles", 1, &CoveragePlanner::customObstacleCB, this);
         plan_path_srv_ = nh_.advertiseService("slic3r_coverage_planner/plan_path", &CoveragePlanner::planPath, this);
 
         param_reconfig_callback_ = boost::bind(&CoveragePlanner::dyn_callback, this, _1, _2);
 
         param_reconfig_server_.reset(new DynamicReconfigServer());
         param_reconfig_server_->setCallback(param_reconfig_callback_);
+
+        tfListener = new tf2_ros::TransformListener(tf2_);
 
         ROS_INFO("Slic3r_coverage_planner initialized");
     }
@@ -193,7 +192,9 @@ namespace slic3r_coverage_planner
 
     bool CoveragePlanner::planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_planner::PlanPathResponse &res)
     {
-
+        ROS_INFO("start planning");
+        ROS_INFO_STREAM("perimeter clockwise: " << doPerimeterClockwise_);
+        ROS_INFO_STREAM("add costmap obstacles: " << use_costmap_converter_);
         Slic3r::Polygon outline_poly;
         for (auto &pt : req.outline.points)
         {
@@ -230,7 +231,8 @@ namespace slic3r_coverage_planner
             // add polygons to holes
             for (auto &obstacle : obstacle_polygons)
             {
-                for (auto &pt : &obstacle.points)
+                Slic3r::Polygon hole_poly;
+                for (auto &pt : obstacle.points)
                 {
                     hole_poly.points.push_back(Point(scale_(pt.x), scale_(pt.y)));
                 }
@@ -403,7 +405,9 @@ namespace slic3r_coverage_planner
             ROS_INFO_STREAM("Starting Fill. Poly size:" << surface.expolygon.contour.points.size());
 
             Slic3r::Polylines lines = fill->fill_surface(surface);
+            ROS_INFO("right before append");
             append_to(fill_lines, lines);
+            ROS_INFO("right after append");
             delete fill;
             fill = nullptr;
 
@@ -419,7 +423,7 @@ namespace slic3r_coverage_planner
 
             visualization_msgs::MarkerArray arr;
             createLineMarkers(area_outlines, obstacle_outlines, fill_lines, arr);
-            marker_array_publisher.publish(arr);
+            marker_array_publisher_.publish(arr);
         }
 
         std_msgs::Header header;
@@ -578,7 +582,7 @@ namespace slic3r_coverage_planner
                 line.remove_duplicate_points();
 
                 auto equally_spaced_points = line.equally_spaced_points(scale_(0.1));
-                if (doPerimeterClockwise == true)
+                if (doPerimeterClockwise_ == true)
                 {
                     std::reverse(equally_spaced_points.begin(), equally_spaced_points.end());
                 }
@@ -630,7 +634,7 @@ namespace slic3r_coverage_planner
         return true;
     }
 
-    void CoveragePlanner::dyn_callback(CoveragePlanner::CoveragePlannerConfig &config, uint32_t level)
+    void CoveragePlanner::dyn_callback(slic3r_coverage_planner::CoveragePlannerConfig &config, uint32_t level)
     {
         doPerimeterClockwise_ = config.perimeter_clockwise;
         visualize_plan_ = config.visualize_plan;
@@ -639,13 +643,13 @@ namespace slic3r_coverage_planner
 
     void CoveragePlanner::customObstacleCB(const costmap_converter::ObstacleArrayMsg::ConstPtr &obst_msg)
     {
-        if (!use_costmap_converter)
+        if (!use_costmap_converter_)
             return;
         boost::mutex::scoped_lock l(custom_obst_mutex_);
         custom_obstacle_msg_ = *obst_msg;
     }
 
-    std::vector<Slic3r::Polygon> getCostmapObstacles()
+    std::vector<Slic3r::Polygon> CoveragePlanner::getCostmapObstacles()
     {
         std::vector<Slic3r::Polygon> obstacle_polygons;
 
@@ -654,42 +658,45 @@ namespace slic3r_coverage_planner
 
         if (!custom_obstacle_msg_.obstacles.empty())
         {
+            
             // We only use the global header to specify the obstacle coordinate system instead of individual ones
-            Eigen::Affine3d obstacle_to_map_eig;
-            try
-            {
-                geometry_msgs::TransformStamped obstacle_to_map = tf_->lookupTransform(global_frame_, ros::Time(0),
-                                                                                       custom_obstacle_msg_.header.frame_id, ros::Time(0),
-                                                                                       custom_obstacle_msg_.header.frame_id, ros::Duration(cfg_.robot.transform_tolerance));
-                obstacle_to_map_eig = tf2::transformToEigen(obstacle_to_map);
-            }
-            catch (tf::TransformException ex)
-            {
-                ROS_ERROR("%s", ex.what());
-                obstacle_to_map_eig.setIdentity();
-            }
+            // Eigen::Affine3d obstacle_to_map_eig;
+            // try
+            // {
+            //     geometry_msgs::TransformStamped obstacle_to_map = tf2_.lookupTransform("map", custom_obstacle_msg_.header.frame_id, ros::Time(0), ros::Duration(2)); // cfg_.robot.transform_tolerance));
+            //     obstacle_to_map_eig = tf2::transformToEigen(obstacle_to_map);
+            // }
+            // catch (tf2::TransformException ex)
+            // {
+            //     ROS_ERROR("%s", ex.what());
+            //     obstacle_to_map_eig.setIdentity();
+            // }
 
             for (size_t i = 0; i < custom_obstacle_msg_.obstacles.size(); ++i)
             {
+                ROS_INFO_STREAM("add obstacle no: " << i);
                 if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 1 && custom_obstacle_msg_.obstacles.at(i).radius > 0) // circle
                 {
-                    Slic3r::Polygon poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
+                    Slic3r::Polygon poly;
+                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
                     obstacle_polygons.push_back(poly);
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 1) // point
                 {
-                    Slic3r::Polygon poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
+                    Slic3r::Polygon poly;
+                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
                     obstacle_polygons.push_back(poly);
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 2) // line
                 {
-                    Slic3r::Polygon poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y),
-                                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().x),
-                                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().y)));
-                    obstacles_.push_back(poly);
+                    Slic3r::Polygon poly;
+                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
+                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().x),
+                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().y)));
+                    obstacle_polygons.push_back(poly);
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.empty())
                 {
@@ -706,11 +713,13 @@ namespace slic3r_coverage_planner
                                                     scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points[j].y)));
                     }
                     // polyobst->finalizePolygon();
-                    obstacles_.push_back(poly);
+                    obstacle_polygons.push_back(poly);
                 }
             }
         }
+        else{
+            ROS_INFO("no obstacles in costmap found");
+        }
+        return obstacle_polygons;
     }
-    return obstacle_polygons;
-}
 }

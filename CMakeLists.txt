@@ -16,6 +16,11 @@ find_package(catkin REQUIRED COMPONENTS
         message_generation
         tf2
         tf2_geometry_msgs
+        tf2_ros
+        tf2_eigen
+        costmap_converter
+        dynamic_reconfigure
+        Eigen3
         )
 
 set(EP_SLIC3R "Slic3r")
@@ -40,7 +45,7 @@ ExternalProject_Add(
 
 
 ## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system thread)
+ find_package(Boost REQUIRED COMPONENTS system thread)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -114,10 +119,9 @@ generate_messages(
 ##     and list every .cfg file to be processed
 
 ## Generate dynamic reconfigure parameters in the 'cfg' folder
-# generate_dynamic_reconfigure_options(
-#   cfg/DynReconf1.cfg
-#   cfg/DynReconf2.cfg
-# )
+generate_dynamic_reconfigure_options(
+    cfg/coverage_planner.cfg
+ )
 
 ###################################
 ## catkin specific configuration ##
@@ -129,7 +133,7 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-        #  INCLUDE_DIRS include
+          INCLUDE_DIRS include
         #  LIBRARIES slic3r_coverage_planner
         #  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp std_msgs
         #  DEPENDS system_lib
@@ -143,7 +147,7 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-        # include
+         include
         ${catkin_INCLUDE_DIRS}
 )
 
@@ -238,6 +242,7 @@ add_executable(slic3r_coverage_planner
         src/coverage_planner.cpp
         src/OutlinePoly.h
         src/OutlinePoly.cpp
+        src/main.cpp
         )
 add_dependencies(slic3r_coverage_planner ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 add_dependencies(slic3r_coverage_planner ${EP_SLIC3R})

@@ -12,6 +12,8 @@
 #include "visualization_msgs/MarkerArray.h"
 #include "Surface.hpp"
 #include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_eigen/tf2_eigen.h>
 #include <Fill/FillPlanePath.hpp>
 #include <PerimeterGenerator.hpp>
 
@@ -22,7 +24,15 @@
 #include <costmap_converter/ObstacleMsg.h>
 #include <costmap_converter/costmap_converter_interface.h>
 
-namespace teb_local_planner
+#include <dynamic_reconfigure/server.h>
+#include <slic3r_coverage_planner/CoveragePlannerConfig.h>
+#include <Eigen/Geometry>
+
+// boost classes
+#include <boost/bind.hpp>
+#include <boost/shared_ptr.hpp>
+
+namespace slic3r_coverage_planner
 {
 
     /**
@@ -36,7 +46,7 @@ namespace teb_local_planner
     public:
         CoveragePlanner();
         bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_planner::PlanPathResponse &res);
-        void dyn_callback(CoveragePlanner::CoveragePlannerConfig &config, uint32_t level);
+        void dyn_callback(slic3r_coverage_planner::CoveragePlannerConfig &config, uint32_t level);
 
     private:
         ros::NodeHandle nh_;
@@ -48,6 +58,8 @@ namespace teb_local_planner
         bool doPerimeterClockwise_;
         bool use_costmap_converter_;
 
+        tf2_ros::Buffer tf2_;
+        tf2_ros::TransformListener *tfListener;
         costmap_converter::ObstacleArrayMsg custom_obstacle_msg_; //!< Copy of the most recent obstacle message
 
         boost::mutex custom_obst_mutex_; //!< Mutex that locks the obstacle array (multi-threaded)
@@ -64,7 +76,7 @@ namespace teb_local_planner
         std::vector<Slic3r::Polygon> getCostmapObstacles();
 
         // dynamic reconfigure
-        typedef dynamic_reconfigure::Server<CoveragePlanner::CoveragePlannerConfig> DynamicReconfigServer;
+        typedef dynamic_reconfigure::Server<slic3r_coverage_planner::CoveragePlannerConfig> DynamicReconfigServer;
         boost::shared_ptr<DynamicReconfigServer> param_reconfig_server_;
         DynamicReconfigServer::CallbackType param_reconfig_callback_;
     };

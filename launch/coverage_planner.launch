@@ -1,0 +1,12 @@
+<launch>
+
+  <!-- Costmap converter to translate costmap occupied cells into polygons-->
+  <node pkg="costmap_converter" type="standalone_converter" name="costmap_converter" output="screen">
+    <param name="costmap_topic" value="/move_base_flex/global_costmap/costmap" />
+    <param name="costmap_update_topic" value="/move_base_flex/global_costmap/costmap_updates" />
+  </node>
+  <!-- slicer coverage planner node -->
+  <node name="coverage_planner" pkg="slic3r_coverage_planner" type="slic3r_coverage_planner"
+    output="screen" />
+
+</launch>
