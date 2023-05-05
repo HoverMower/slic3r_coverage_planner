@@ -73,7 +73,8 @@ namespace slic3r_coverage_planner
         void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygons> obstacle_groups, Polylines &fill_lines, visualization_msgs::MarkerArray &markerArray);
         void traverse(std::vector<PerimeterGeneratorLoop> &contours, std::vector<Polygons> &line_groups);
 
-        std::vector<Slic3r::Polygon> getCostmapObstacles();
+        //std::vector<Slic3r::Polygon> getCostmapObstacles(Slic3r::ExPolygon area_polygon);
+        std::vector<Slic3r::Polygon> getCostmapObstacles(Slic3r::Polygon area_polygon);
 
         // dynamic reconfigure
         typedef dynamic_reconfigure::Server<slic3r_coverage_planner::CoveragePlannerConfig> DynamicReconfigServer;

@@ -109,6 +109,14 @@ namespace slic3r_coverage_planner
                         vpt.y = unscale(pt.y);
                         marker.points.push_back(vpt);
                     }
+                    // republish the first point to get a closed polygon
+                    if (!line.points.empty())
+                    {
+                        geometry_msgs::Point vpt;
+                        vpt.x = unscale(line.points[0].x);
+                        vpt.y = unscale(line.points[0].y);
+                        marker.points.push_back(vpt);
+                    }
 
                     markerArray.markers.push_back(marker);
                 }
@@ -166,7 +174,14 @@ namespace slic3r_coverage_planner
                         vpt.y = unscale(pt.y);
                         marker.points.push_back(vpt);
                     }
-
+                    // republish the first point to get a closed polygon
+                    if (!line.points.empty())
+                    {
+                        geometry_msgs::Point vpt;
+                        vpt.x = unscale(line.points[0].x);
+                        vpt.y = unscale(line.points[0].y);
+                        marker.points.push_back(vpt);
+                    }
                     markerArray.markers.push_back(marker);
                 }
             }
@@ -226,7 +241,7 @@ namespace slic3r_coverage_planner
             std::vector<Slic3r::Polygon> obstacle_polygons;
 
             // convert costmap to polygon
-            obstacle_polygons = getCostmapObstacles();
+            obstacle_polygons = getCostmapObstacles(outline_poly);
 
             // add polygons to holes
             for (auto &obstacle : obstacle_polygons)
@@ -362,7 +377,7 @@ namespace slic3r_coverage_planner
                 NEXT_CONTOUR:;
                 }
             }
-
+            // recursive call to collect all line segments
             traverse(contours[0], area_outlines);
             for (auto &hole : holes)
             {
@@ -378,45 +393,43 @@ namespace slic3r_coverage_planner
         ExPolygons expp = union_ex(last);
 
         // Go through the innermost poly and create the fill path using a Fill object
-        for (auto &poly : expp)
-        {
-            Slic3r::Surface surface(Slic3r::SurfaceType::stBottom, poly);
+        // for (auto &poly : expp)
+        // {
+        //     Slic3r::Surface surface(Slic3r::SurfaceType::stBottom, poly);
 
-            Slic3r::Fill *fill;
-            if (req.fill_type == slic3r_coverage_planner::PlanPathRequest::FILL_LINEAR)
-            {
-                fill = new Slic3r::FillRectilinear();
-            }
-            else
-            {
-                fill = new Slic3r::FillConcentric();
-            }
-            fill->link_max_length = scale_(1.0);
-            fill->angle = req.angle;
-            fill->z = scale_(1.0);
-            fill->endpoints_overlap = 0;
-            fill->density = 1.0;
-            fill->dont_connect = false;
-            fill->dont_adjust = false;
-            fill->min_spacing = req.distance;
-            fill->complete = false;
-            fill->link_max_length = 0;
+        //     Slic3r::Fill *fill;
+        //     if (req.fill_type == slic3r_coverage_planner::PlanPathRequest::FILL_LINEAR)
+        //     {
+        //         fill = new Slic3r::FillRectilinear();
+        //     }
+        //     else
+        //     {
+        //         fill = new Slic3r::FillConcentric();
+        //     }
+        //     fill->link_max_length = scale_(1.0);
+        //     fill->angle = req.angle;
+        //     fill->z = scale_(1.0);
+        //     fill->endpoints_overlap = 0;
+        //     fill->density = 1.0;
+        //     fill->dont_connect = false;
+        //     fill->dont_adjust = false;
+        //     fill->min_spacing = req.distance;
+        //     fill->complete = false;
+        //     fill->link_max_length = 0;
 
-            ROS_INFO_STREAM("Starting Fill. Poly size:" << surface.expolygon.contour.points.size());
+        //     ROS_INFO_STREAM("Starting Fill. Poly size:" << surface.expolygon.contour.points.size());
 
-            Slic3r::Polylines lines = fill->fill_surface(surface);
-            ROS_INFO("right before append");
-            append_to(fill_lines, lines);
-            ROS_INFO("right after append");
-            delete fill;
-            fill = nullptr;
+        //     Slic3r::Polylines lines = fill->fill_surface(surface);
+        //     append_to(fill_lines, lines);
+        //     delete fill;
+        //     fill = nullptr;
 
-            ROS_INFO_STREAM("Fill Complete. Polyline count: " << lines.size());
-            for (int i = 0; i < lines.size(); i++)
-            {
-                ROS_INFO_STREAM("Polyline " << i << " has point count: " << lines[i].points.size());
-            }
-        }
+        //     ROS_INFO_STREAM("Fill Complete. Polyline count: " << lines.size());
+        //     for (int i = 0; i < lines.size(); i++)
+        //     {
+        //         ROS_INFO_STREAM("Polyline " << i << " has point count: " << lines[i].points.size());
+        //     }
+        // }
 
         if (visualize_plan_)
         {
@@ -431,6 +444,7 @@ namespace slic3r_coverage_planner
         header.frame_id = "map";
         header.seq = 0;
 
+        // building the path for outline
         for (auto &group : area_outlines)
         {
             slic3r_coverage_planner::Path path;
@@ -503,6 +517,7 @@ namespace slic3r_coverage_planner
             res.paths.push_back(path);
         }
 
+        // Building the path for infill
         for (int i = 0; i < fill_lines.size(); i++)
         {
             auto &line = fill_lines[i];
@@ -558,6 +573,7 @@ namespace slic3r_coverage_planner
             res.paths.push_back(path);
         }
 
+        // building the path for obstacles
         for (auto &group : obstacle_outlines)
         {
             slic3r_coverage_planner::Path path;
@@ -649,7 +665,8 @@ namespace slic3r_coverage_planner
         custom_obstacle_msg_ = *obst_msg;
     }
 
-    std::vector<Slic3r::Polygon> CoveragePlanner::getCostmapObstacles()
+    // std::vector<Slic3r::Polygon> CoveragePlanner::getCostmapObstacles(Slic3r::ExPolygon area_polygon)
+    std::vector<Slic3r::Polygon> CoveragePlanner::getCostmapObstacles(Slic3r::Polygon area_polygon)
     {
         std::vector<Slic3r::Polygon> obstacle_polygons;
 
@@ -658,7 +675,7 @@ namespace slic3r_coverage_planner
 
         if (!custom_obstacle_msg_.obstacles.empty())
         {
-            
+
             // We only use the global header to specify the obstacle coordinate system instead of individual ones
             // Eigen::Affine3d obstacle_to_map_eig;
             // try
@@ -674,29 +691,52 @@ namespace slic3r_coverage_planner
 
             for (size_t i = 0; i < custom_obstacle_msg_.obstacles.size(); ++i)
             {
-                ROS_INFO_STREAM("add obstacle no: " << i);
                 if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 1 && custom_obstacle_msg_.obstacles.at(i).radius > 0) // circle
                 {
-                    Slic3r::Polygon poly;
-                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
-                    obstacle_polygons.push_back(poly);
+                    Slic3r::Polygon poly; // new obstacle polygon
+                    // new point of obstacle polygon
+                    Slic3r::Point new_point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                            scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y));
+
+                    // check if point lies inside the area we want to cover.
+                    // if so, add new obstacle polygon
+                    if (area_polygon.contains(new_point))
+                    {
+                        poly.points.push_back(new_point);
+                        obstacle_polygons.push_back(poly);
+                        ROS_INFO_STREAM("circular obstacle " << i << " inside ex_poly");
+                    }
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 1) // point
                 {
                     Slic3r::Polygon poly;
-                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
-                    obstacle_polygons.push_back(poly);
+                    Slic3r::Point new_point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                            scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y));
+                    if (area_polygon.contains(new_point))
+                    {
+                        poly.points.push_back(new_point);
+                        obstacle_polygons.push_back(poly);
+                        ROS_INFO_STREAM("point obstacle " << i << " inside ex_poly");
+                    }
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.size() == 2) // line
                 {
                     Slic3r::Polygon poly;
-                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
-                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y)));
-                    poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().x),
-                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().y)));
-                    obstacle_polygons.push_back(poly);
+                    // get start point if line
+                    Slic3r::Point start_point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().x),
+                                              scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.front().y));
+                    // get end_line of point
+                    Slic3r::Point end_point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().x),
+                                            scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points.back().y));
+                    // add the obstacle, if start and end of line lies inside
+                    // TODO: trim the line, if e.g. start is outside but end is inside
+                    if (area_polygon.contains(start_point) && area_polygon.contains(end_point))
+                    {
+                        poly.points.push_back(start_point);
+                        poly.points.push_back(end_point);
+                        obstacle_polygons.push_back(poly);
+                        ROS_INFO_STREAM("line obstacle " << i << " inside ex_poly");
+                    }
                 }
                 else if (custom_obstacle_msg_.obstacles.at(i).polygon.points.empty())
                 {
@@ -709,15 +749,26 @@ namespace slic3r_coverage_planner
                     Slic3r::Polygon poly;
                     for (size_t j = 0; j < custom_obstacle_msg_.obstacles.at(i).polygon.points.size(); ++j)
                     {
-                        poly.points.push_back(Point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points[j].x),
-                                                    scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points[j].y)));
+                        // get a single point of the polygon
+                        Slic3r::Point new_point(scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points[j].x),
+                                                scale_(custom_obstacle_msg_.obstacles.at(i).polygon.points[j].y));
+                        // only take the new point, if it lies inside the area we want to cover
+                        if (area_polygon.contains(new_point))
+                        {
+                            poly.points.push_back(new_point);
+                        }
                     }
                     // polyobst->finalizePolygon();
-                    obstacle_polygons.push_back(poly);
+                    if (!poly.points.empty())
+                    {
+                        obstacle_polygons.push_back(poly);
+                        ROS_INFO_STREAM("polygonal obstacle " << i << " inside ex_poly with " << poly.points.size() << "points");
+                    }
                 }
             }
         }
-        else{
+        else
+        {
             ROS_INFO("no obstacles in costmap found");
         }
         return obstacle_polygons;
