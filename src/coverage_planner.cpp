@@ -1,39 +1,41 @@
 //
 // Created by Clemens Elflein on 27.08.21.
+// Migratet to ROS2 by Patrick Weber on 13.11.2023
 //
 
-#include "ros/ros.h"
+#include "coverage_planner.hpp"
 
-#include "ExPolygon.hpp"
-#include "Polyline.hpp"
-#include "Fill/FillRectilinear.hpp"
-#include "Fill/FillConcentric.hpp"
+CoveragePlanner::CoveragePlanner(std::string name) : Node(name)
+{
+    auto param_desc = rcl_interfaces::msg::ParameterDescriptor{};
+    param_desc.description = "Publish result as marker array";
 
-#include "slic3r_coverage_planner/PlanPath.h"
-#include "visualization_msgs/MarkerArray.h"
-#include "Surface.hpp"
-#include <tf2/LinearMath/Quaternion.h>
-#include <Fill/FillPlanePath.hpp>
-#include <PerimeterGenerator.hpp>
+    this->declare_parameter("visualize_plan", true, param_desc);
 
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-#include "ClipperUtils.hpp"
-#include "ExtrusionEntityCollection.hpp"
-#include <dynamic_reconfigure/server.h>
-#include "slic3r_coverage_planner/coverage_plannerConfig.h"
+    param_desc.description = "Perimeter of area should be followed clockwise";
+    this->declare_parameter("doPerimeterClockwise", false);
 
-bool visualize_plan;
-bool doPerimeterClockwise;
-bool useEquallySpacedPoints;
-ros::Publisher marker_array_publisher;
+    param_desc.description = "build equally spaced poses on path";
+    this->declare_parameter("equally_spaced_points", true);
 
-void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygons> obstacle_groups, Polylines &fill_lines, visualization_msgs::MarkerArray &markerArray)
+    this->get_parameter("visualize_plan", visualize_plan);
+    this->get_parameter("doPerimeterClockwise", doPerimeterClockwise);
+    this->get_parameter("equally_spaced_points", useEquallySpacedPoints);
+
+    // Register  publisher
+    marker_array_publisher = this->create_publisher<visualization_msgs::msg::MarkerArray>("slic3r_coverage_planner/path_marker_array", 100);
+
+    // Register services
+    path_service = this->create_service<slic3r_coverage_planner::srv::PlanPath>("slic3r_coverage_planner/plan_path", std::bind(&CoveragePlanner::planPath, this, std::placeholders::_1, std::placeholders::_2));
+}
+
+void CoveragePlanner::createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygons> obstacle_groups, Polylines &fill_lines, visualization_msgs::msg::MarkerArray &markerArray)
 {
 
-    std::vector<std_msgs::ColorRGBA> colors;
+    std::vector<std_msgs::msg::ColorRGBA> colors;
 
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 1.0;
         color.g = 0.0;
         color.b = 0.0;
@@ -41,7 +43,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 0.0;
         color.g = 1.0;
         color.b = 0.0;
@@ -49,7 +51,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 0.0;
         color.g = 0.0;
         color.b = 1.0;
@@ -57,7 +59,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 1.0;
         color.g = 1.0;
         color.b = 0.0;
@@ -65,7 +67,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 1.0;
         color.g = 0.0;
         color.b = 1.0;
@@ -73,7 +75,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 0.0;
         color.g = 1.0;
         color.b = 1.0;
@@ -81,7 +83,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         colors.push_back(color);
     }
     {
-        std_msgs::ColorRGBA color;
+        std_msgs::msg::ColorRGBA color;
         color.r = 1.0;
         color.g = 1.0;
         color.b = 1.0;
@@ -96,20 +98,20 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         for (auto &line : group)
         {
             {
-                visualization_msgs::Marker marker;
+                visualization_msgs::msg::Marker marker;
 
                 marker.header.frame_id = "map";
                 marker.ns = "mower_map_service_lines";
                 marker.id = static_cast<int>(markerArray.markers.size());
                 marker.frame_locked = true;
-                marker.action = visualization_msgs::Marker::ADD;
-                marker.type = visualization_msgs::Marker::LINE_STRIP;
+                marker.action = visualization_msgs::msg::Marker::ADD;
+                marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
                 marker.color = colors[cidx];
                 marker.pose.orientation.w = 1;
                 marker.scale.x = marker.scale.y = marker.scale.z = 0.02;
                 for (auto &pt : line.points)
                 {
-                    geometry_msgs::Point vpt;
+                    geometry_msgs::msg::Point vpt;
                     vpt.x = unscale(pt.x);
                     vpt.y = unscale(pt.y);
                     marker.points.push_back(vpt);
@@ -124,20 +126,20 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
     for (auto &line : fill_lines)
     {
         {
-            visualization_msgs::Marker marker;
+            visualization_msgs::msg::Marker marker;
 
             marker.header.frame_id = "map";
             marker.ns = "mower_map_service_lines";
             marker.id = static_cast<int>(markerArray.markers.size());
             marker.frame_locked = true;
-            marker.action = visualization_msgs::Marker::ADD;
-            marker.type = visualization_msgs::Marker::LINE_STRIP;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
             marker.color = colors[cidx];
             marker.pose.orientation.w = 1;
             marker.scale.x = marker.scale.y = marker.scale.z = 0.02;
             for (auto &pt : line.points)
             {
-                geometry_msgs::Point vpt;
+                geometry_msgs::msg::Point vpt;
                 vpt.x = unscale(pt.x);
                 vpt.y = unscale(pt.y);
                 marker.points.push_back(vpt);
@@ -153,20 +155,20 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
         for (auto &line : group)
         {
             {
-                visualization_msgs::Marker marker;
+                visualization_msgs::msg::Marker marker;
 
                 marker.header.frame_id = "map";
                 marker.ns = "mower_map_service_lines";
                 marker.id = static_cast<int>(markerArray.markers.size());
                 marker.frame_locked = true;
-                marker.action = visualization_msgs::Marker::ADD;
-                marker.type = visualization_msgs::Marker::LINE_STRIP;
+                marker.action = visualization_msgs::msg::Marker::ADD;
+                marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
                 marker.color = colors[cidx];
                 marker.pose.orientation.w = 1;
                 marker.scale.x = marker.scale.y = marker.scale.z = 0.02;
                 for (auto &pt : line.points)
                 {
-                    geometry_msgs::Point vpt;
+                    geometry_msgs::msg::Point vpt;
                     vpt.x = unscale(pt.x);
                     vpt.y = unscale(pt.y);
                     marker.points.push_back(vpt);
@@ -179,7 +181,7 @@ void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygon
     }
 }
 
-void traverse(std::vector<PerimeterGeneratorLoop> &contours, std::vector<Polygons> &line_groups)
+void CoveragePlanner::traverse(std::vector<PerimeterGeneratorLoop> &contours, std::vector<Polygons> &line_groups)
 {
     for (auto &contour : contours)
     {
@@ -195,13 +197,14 @@ void traverse(std::vector<PerimeterGeneratorLoop> &contours, std::vector<Polygon
     }
 }
 
-bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_planner::PlanPathResponse &res)
+void CoveragePlanner::planPath(const std::shared_ptr<slic3r_coverage_planner::srv::PlanPath::Request> req,
+                               std::shared_ptr<slic3r_coverage_planner::srv::PlanPath::Response> res)
 {
-    ROS_INFO_STREAM("perimeter clockwise: " << doPerimeterClockwise);
-    ROS_INFO_STREAM("equally_spaced points: " << useEquallySpacedPoints);
+    RCLCPP_INFO_STREAM(get_logger(), "perimeter clockwise: " << doPerimeterClockwise);
+    RCLCPP_INFO_STREAM(get_logger(), "equally_spaced points: " << useEquallySpacedPoints);
 
     Slic3r::Polygon outline_poly;
-    for (auto &pt : req.outline.points)
+    for (auto &pt : req->outline.points)
     {
         outline_poly.points.push_back(Point(scale_(pt.x), scale_(pt.y)));
     }
@@ -211,7 +214,7 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
     // This ExPolygon contains our input area with holes.
     Slic3r::ExPolygon expoly(outline_poly);
 
-    for (auto &hole : req.holes)
+    for (auto &hole : req->holes)
     {
         Slic3r::Polygon hole_poly;
         for (auto &pt : hole.points)
@@ -228,16 +231,16 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
     Polylines fill_lines;
     std::vector<Polygons> obstacle_outlines;
 
-    coord_t distance = scale_(req.distance);
-    coord_t outer_distance = scale_(req.outer_offset);
+    coord_t distance = scale_(req->distance);
+    coord_t outer_distance = scale_(req->outer_offset);
 
     // detect how many perimeters must be generated for this island
-    int loops = req.outline_count;
+    int loops = req->outline_count;
 
-    ROS_INFO_STREAM("generating " << loops << " outlines");
+    RCLCPP_INFO_STREAM(get_logger(), "generating " << loops << " outlines");
 
     const int loop_number = loops - 1; // 0-indexed loops
-    const int inner_loop_number = loop_number - req.outline_overlap_count;
+    const int inner_loop_number = loop_number - req->outline_overlap_count;
 
     Polygons gaps;
 
@@ -370,7 +373,7 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
         Slic3r::Surface surface(Slic3r::SurfaceType::stBottom, poly);
 
         Slic3r::Fill *fill;
-        if (req.fill_type == slic3r_coverage_planner::PlanPathRequest::FILL_LINEAR)
+        if (req->fill_type == slic3r_coverage_planner::srv::PlanPath::Request::FILL_LINEAR)
         {
             fill = new Slic3r::FillRectilinear();
         }
@@ -379,46 +382,46 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             fill = new Slic3r::FillConcentric();
         }
         fill->link_max_length = scale_(1.0);
-        fill->angle = req.angle;
+        fill->angle = req->angle;
         fill->z = scale_(1.0);
         fill->endpoints_overlap = 0;
         fill->density = 1.0;
         fill->dont_connect = false;
         fill->dont_adjust = false;
-        fill->min_spacing = req.distance;
+        fill->min_spacing = req->distance;
         fill->complete = false;
         fill->link_max_length = 0;
 
-        ROS_INFO_STREAM("Starting Fill. Poly size:" << surface.expolygon.contour.points.size());
+        RCLCPP_INFO_STREAM(get_logger(), "Starting Fill. Poly size:" << surface.expolygon.contour.points.size());
 
         Slic3r::Polylines lines = fill->fill_surface(surface);
         append_to(fill_lines, lines);
         delete fill;
         fill = nullptr;
 
-        ROS_INFO_STREAM("Fill Complete. Polyline count: " << lines.size());
+        RCLCPP_INFO_STREAM(get_logger(), "Fill Complete. Polyline count: " << lines.size());
         for (int i = 0; i < lines.size(); i++)
         {
-            ROS_INFO_STREAM("Polyline " << i << " has point count: " << lines[i].points.size());
+            RCLCPP_INFO_STREAM(get_logger(), "Polyline " << i << " has point count: " << lines[i].points.size());
         }
     }
 
     if (visualize_plan)
     {
 
-        visualization_msgs::MarkerArray arr;
+        visualization_msgs::msg::MarkerArray arr;
         createLineMarkers(area_outlines, obstacle_outlines, fill_lines, arr);
-        marker_array_publisher.publish(arr);
+        marker_array_publisher->publish(arr);
     }
 
-    std_msgs::Header header;
-    header.stamp = ros::Time::now();
+    std_msgs::msg::Header header;
+    header.stamp = get_clock()->now();
     header.frame_id = "map";
-    header.seq = 0;
+  //  header.seq = 0;
 
     for (auto &group : area_outlines)
     {
-        slic3r_coverage_planner::Path path;
+        slic3r_coverage_planner::msg::Path path;
         path.is_outline = true;
         path.path.header = header;
         int split_index = 0;
@@ -455,10 +458,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             }
             if (equally_spaced_points.size() < 2)
             {
-                ROS_INFO("Skipping single dot");
+                RCLCPP_INFO(get_logger(), "Skipping single dot");
                 continue;
             }
-            ROS_INFO_STREAM("Got " << equally_spaced_points.size() << " points");
+            RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
 
             Point *lastPoint = nullptr;
             for (auto &pt : equally_spaced_points)
@@ -473,9 +476,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
 
                 auto dir = pt - *lastPoint;
                 double orientation = atan2(dir.y, dir.x);
-                tf2::Quaternion q(0.0, 0.0, orientation);
+                tf2::Quaternion q;
+                q.setRPY(0.0, 0.0, orientation);
 
-                geometry_msgs::PoseStamped pose;
+                geometry_msgs::msg::PoseStamped pose;
                 pose.header = header;
                 pose.pose.orientation = tf2::toMsg(q);
                 pose.pose.position.x = unscale(lastPoint->x);
@@ -486,7 +490,7 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             }
 
             // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
-            geometry_msgs::PoseStamped pose;
+            geometry_msgs::msg::PoseStamped pose;
             pose.header = header;
             pose.pose.orientation = path.path.poses.back().pose.orientation;
             pose.pose.position.x = unscale(lastPoint->x);
@@ -494,13 +498,13 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             pose.pose.position.z = 0;
             path.path.poses.push_back(pose);
         }
-        res.paths.push_back(path);
+        res->paths.push_back(path);
     }
 
     for (int i = 0; i < fill_lines.size(); i++)
     {
         auto &line = fill_lines[i];
-        slic3r_coverage_planner::Path path;
+        slic3r_coverage_planner::msg::Path path;
         path.is_outline = false;
         path.path.header = header;
 
@@ -518,10 +522,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
 
         if (equally_spaced_points.size() < 2)
         {
-            ROS_INFO("Skipping single dot");
+            RCLCPP_INFO(get_logger(), "Skipping single dot");
             continue;
         }
-        ROS_INFO_STREAM("Got " << equally_spaced_points.size() << " points");
+        RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
 
         Point *lastPoint = nullptr;
         for (auto &pt : equally_spaced_points)
@@ -536,9 +540,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
 
             auto dir = pt - *lastPoint;
             double orientation = atan2(dir.y, dir.x);
-            tf2::Quaternion q(0.0, 0.0, orientation);
+            tf2::Quaternion q;
+            q.setRPY(0.0, 0.0, orientation);
 
-            geometry_msgs::PoseStamped pose;
+            geometry_msgs::msg::PoseStamped pose;
             pose.header = header;
             pose.pose.orientation = tf2::toMsg(q);
             pose.pose.position.x = unscale(lastPoint->x);
@@ -549,7 +554,7 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
         }
 
         // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
-        geometry_msgs::PoseStamped pose;
+        geometry_msgs::msg::PoseStamped pose;
         pose.header = header;
         pose.pose.orientation = path.path.poses.back().pose.orientation;
         pose.pose.position.x = unscale(lastPoint->x);
@@ -557,12 +562,12 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
         pose.pose.position.z = 0;
         path.path.poses.push_back(pose);
 
-        res.paths.push_back(path);
+        res->paths.push_back(path);
     }
 
     for (auto &group : obstacle_outlines)
     {
-        slic3r_coverage_planner::Path path;
+        slic3r_coverage_planner::msg::Path path;
         path.is_outline = true;
         path.path.header = header;
         int split_index = 0;
@@ -600,10 +605,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
 
             if (equally_spaced_points.size() < 2)
             {
-                ROS_INFO("Skipping single dot");
+                RCLCPP_INFO(get_logger(), "Skipping single dot");
                 continue;
             }
-            ROS_INFO_STREAM("Got " << equally_spaced_points.size() << " points");
+            RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
 
             Point *lastPoint = nullptr;
             for (auto &pt : equally_spaced_points)
@@ -618,9 +623,10 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
 
                 auto dir = pt - *lastPoint;
                 double orientation = atan2(dir.y, dir.x);
-                tf2::Quaternion q(0.0, 0.0, orientation);
+                tf2::Quaternion q;
+                q.setRPY(0.0, 0.0, orientation);
 
-                geometry_msgs::PoseStamped pose;
+                geometry_msgs::msg::PoseStamped pose;
                 pose.header = header;
                 pose.pose.orientation = tf2::toMsg(q);
                 pose.pose.position.x = unscale(lastPoint->x);
@@ -631,7 +637,7 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             }
 
             // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
-            geometry_msgs::PoseStamped pose;
+            geometry_msgs::msg::PoseStamped pose;
             pose.header = header;
             pose.pose.orientation = path.path.poses.back().pose.orientation;
             pose.pose.position.x = unscale(lastPoint->x);
@@ -639,41 +645,37 @@ bool planPath(slic3r_coverage_planner::PlanPathRequest &req, slic3r_coverage_pla
             pose.pose.position.z = 0;
             path.path.poses.push_back(pose);
         }
-        res.paths.push_back(path);
+        res->paths.push_back(path);
     }
 
-    return true;
+    return;
 }
 
-    void reconfigureCB(slic3r_coverage_planner::coverage_plannerConfig &c, uint32_t level)
-    {
-        visualize_plan = c.visualize_plan;
-        doPerimeterClockwise = c.doPerimeterClockwise;
-        useEquallySpacedPoints = c.equally_spaced_points;
-    }
-
-int main(int argc, char **argv)
+rcl_interfaces::msg::SetParametersResult CoveragePlanner::parametersCallback(
+    const std::vector<rclcpp::Parameter> &parameters)
 {
-    ros::init(argc, argv, "slic3r_coverage_planner");
-
-    ros::NodeHandle n;
-    ros::NodeHandle paramNh("~");
-
-    dynamic_reconfigure::Server<slic3r_coverage_planner::coverage_plannerConfig> srv;
-    dynamic_reconfigure::Server<slic3r_coverage_planner::coverage_plannerConfig>::CallbackType f = boost::bind(&reconfigureCB, _1, _2);
-    srv.setCallback(f);
-
-    ROS_INFO_STREAM("Perimeter Clockwise: " << doPerimeterClockwise);
-    ROS_INFO_STREAM("build equally spaced points: " << useEquallySpacedPoints);
-
-    if (visualize_plan)
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "success";
+    // Here update class attributes, do some actions, etc.
+    for (const auto &param : parameters)
     {
-        marker_array_publisher = n.advertise<visualization_msgs::MarkerArray>(
-            "slic3r_coverage_planner/path_marker_array", 100, true);
+        if (param.get_name() == "visualize_plan")
+        {
+            this->visualize_plan = param.as_bool();
+            RCLCPP_INFO(this->get_logger(), "new value for visualize plan: %i", this->visualize_plan);
+        }
+        if (param.get_name() == "doPerimeterclockwise")
+        {
+            this->doPerimeterClockwise = param.as_bool();
+            RCLCPP_INFO(this->get_logger(), "new value for perimeter clockwise: %i", this->doPerimeterClockwise);
+        }
+        if (param.get_name() == "useEquallySpacedPoints")
+        {
+            this->useEquallySpacedPoints = param.as_bool();
+            RCLCPP_INFO(this->get_logger(), "new value for equally spaced points: %i", this->useEquallySpacedPoints);
+        }
     }
 
-    ros::ServiceServer plan_path_srv = n.advertiseService("slic3r_coverage_planner/plan_path", planPath);
-
-    ros::spin();
-    return 0;
+    return result;
 }
