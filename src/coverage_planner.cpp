@@ -9,14 +9,15 @@ CoveragePlanner::CoveragePlanner(std::string name) : Node(name)
 {
     auto param_desc = rcl_interfaces::msg::ParameterDescriptor{};
     param_desc.description = "Publish result as marker array";
-
     this->declare_parameter("visualize_plan", true, param_desc);
 
-    param_desc.description = "Perimeter of area should be followed clockwise";
-    this->declare_parameter("doPerimeterClockwise", false);
+    auto param_desc1 = rcl_interfaces::msg::ParameterDescriptor{};
+    param_desc1.description = "Follow Perimeter of area cw";
+    this->declare_parameter("doPerimeterClockwise", false, param_desc1);
 
-    param_desc.description = "build equally spaced poses on path";
-    this->declare_parameter("equally_spaced_points", true);
+    auto param_desc2 = rcl_interfaces::msg::ParameterDescriptor{};
+    param_desc2.description = "build equally spaced poses";
+    this->declare_parameter("equally_spaced_points", true, param_desc2);
 
     this->get_parameter("visualize_plan", visualize_plan);
     this->get_parameter("doPerimeterClockwise", doPerimeterClockwise);
@@ -27,6 +28,10 @@ CoveragePlanner::CoveragePlanner(std::string name) : Node(name)
 
     // Register services
     path_service = this->create_service<slic3r_coverage_planner::srv::PlanPath>("slic3r_coverage_planner/plan_path", std::bind(&CoveragePlanner::planPath, this, std::placeholders::_1, std::placeholders::_2));
+
+    // register parameter change callback handle
+    callback_handle_ = this->add_on_set_parameters_callback(
+        std::bind(&CoveragePlanner::parametersCallback, this, std::placeholders::_1));
 }
 
 void CoveragePlanner::createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygons> obstacle_groups, Polylines &fill_lines, visualization_msgs::msg::MarkerArray &markerArray)
@@ -417,7 +422,7 @@ void CoveragePlanner::planPath(const std::shared_ptr<slic3r_coverage_planner::sr
     std_msgs::msg::Header header;
     header.stamp = get_clock()->now();
     header.frame_id = "map";
-  //  header.seq = 0;
+    //  header.seq = 0;
 
     for (auto &group : area_outlines)
     {
@@ -665,12 +670,12 @@ rcl_interfaces::msg::SetParametersResult CoveragePlanner::parametersCallback(
             this->visualize_plan = param.as_bool();
             RCLCPP_INFO(this->get_logger(), "new value for visualize plan: %i", this->visualize_plan);
         }
-        if (param.get_name() == "doPerimeterclockwise")
+        if (param.get_name() == "doPerimeterClockwise")
         {
             this->doPerimeterClockwise = param.as_bool();
             RCLCPP_INFO(this->get_logger(), "new value for perimeter clockwise: %i", this->doPerimeterClockwise);
         }
-        if (param.get_name() == "useEquallySpacedPoints")
+        if (param.get_name() == "equally_spaced_points")
         {
             this->useEquallySpacedPoints = param.as_bool();
             RCLCPP_INFO(this->get_logger(), "new value for equally spaced points: %i", this->useEquallySpacedPoints);
