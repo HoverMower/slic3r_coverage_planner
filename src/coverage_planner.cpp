@@ -192,13 +192,36 @@ void CoveragePlanner::traverse(std::vector<PerimeterGeneratorLoop> &contours, st
     {
         if (contour.children.empty())
         {
-            line_groups.push_back(Polygons());
+            // Grouping together multiple polygons can lead to issues since the segment
+            // from the last point of the n polygon to the first point of the n+1 polygon might go through not authorized areas or obstacles
+            // line_groups.push_back(Polygons());
         }
         else
         {
             traverse(contour.children, line_groups);
         }
+        line_groups.push_back(Polygons());
         line_groups.back().push_back(contour.polygon);
+    }
+}
+
+void CoveragePlanner::groupPolygons(std::vector<Polygons> &polygons, float distance_lines)
+{
+    Slic3r::Polygons *currentPolygons = &polygons[0];
+    for (int i = 1; i < (int)polygons.size(); ++i)
+    {
+        Slic3r::Point lastPoint = currentPolygons->back().points.back();
+        auto distance = unscale(lastPoint.distance_to(polygons[i].front().points.front()));
+        if (distance < distance_lines * 3)
+        {
+            currentPolygons->push_back(polygons[i].front());
+            polygons.erase(polygons.begin() + i);
+            --i;
+        }
+        else
+        {
+            currentPolygons = &polygons[i];
+        }
     }
 }
 
@@ -364,10 +387,10 @@ void CoveragePlanner::planPath(const std::shared_ptr<slic3r_coverage_planner::sr
             traverse(hole, obstacle_outlines);
         }
 
-        for (auto &obstacle_group : obstacle_outlines)
-        {
-            std::reverse(obstacle_group.begin(), obstacle_group.end());
-        }
+        std::reverse(obstacle_outlines.begin(), obstacle_outlines.end());
+
+        groupPolygons(area_outlines, req->distance);
+        groupPolygons(obstacle_outlines, req->distance);
     }
 
     ExPolygons expp = union_ex(inner);
@@ -506,69 +529,69 @@ void CoveragePlanner::planPath(const std::shared_ptr<slic3r_coverage_planner::sr
         res->paths.push_back(path);
     }
 
-    for (int i = 0; i < fill_lines.size(); i++)
-    {
-        auto &line = fill_lines[i];
-        slic3r_coverage_planner::msg::Path path;
-        path.is_outline = false;
-        path.path.header = header;
+    // for (int i = 0; i < fill_lines.size(); i++)
+    // {
+    //     auto &line = fill_lines[i];
+    //     slic3r_coverage_planner::msg::Path path;
+    //     path.is_outline = false;
+    //     path.path.header = header;
 
-        line.remove_duplicate_points();
+    //     line.remove_duplicate_points();
 
-        Points equally_spaced_points;
-        if (useEquallySpacedPoints == true)
-        {
-            equally_spaced_points = line.equally_spaced_points(scale_(0.1));
-        }
-        else
-        {
-            equally_spaced_points = line.points;
-        }
+    //     Points equally_spaced_points;
+    //     if (useEquallySpacedPoints == true)
+    //     {
+    //         equally_spaced_points = line.equally_spaced_points(scale_(0.1));
+    //     }
+    //     else
+    //     {
+    //         equally_spaced_points = line.points;
+    //     }
 
-        if (equally_spaced_points.size() < 2)
-        {
-            RCLCPP_INFO(get_logger(), "Skipping single dot");
-            continue;
-        }
-        RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
+    //     if (equally_spaced_points.size() < 2)
+    //     {
+    //         RCLCPP_INFO(get_logger(), "Skipping single dot");
+    //         continue;
+    //     }
+    //     RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
 
-        Point *lastPoint = nullptr;
-        for (auto &pt : equally_spaced_points)
-        {
-            if (lastPoint == nullptr)
-            {
-                lastPoint = &pt;
-                continue;
-            }
+    //     Point *lastPoint = nullptr;
+    //     for (auto &pt : equally_spaced_points)
+    //     {
+    //         if (lastPoint == nullptr)
+    //         {
+    //             lastPoint = &pt;
+    //             continue;
+    //         }
 
-            // calculate pose for "lastPoint" pointing to current point
+    //         // calculate pose for "lastPoint" pointing to current point
 
-            auto dir = pt - *lastPoint;
-            double orientation = atan2(dir.y, dir.x);
-            tf2::Quaternion q;
-            q.setRPY(0.0, 0.0, orientation);
+    //         auto dir = pt - *lastPoint;
+    //         double orientation = atan2(dir.y, dir.x);
+    //         tf2::Quaternion q;
+    //         q.setRPY(0.0, 0.0, orientation);
 
-            geometry_msgs::msg::PoseStamped pose;
-            pose.header = header;
-            pose.pose.orientation = tf2::toMsg(q);
-            pose.pose.position.x = unscale(lastPoint->x);
-            pose.pose.position.y = unscale(lastPoint->y);
-            pose.pose.position.z = 0;
-            path.path.poses.push_back(pose);
-            lastPoint = &pt;
-        }
+    //         geometry_msgs::msg::PoseStamped pose;
+    //         pose.header = header;
+    //         pose.pose.orientation = tf2::toMsg(q);
+    //         pose.pose.position.x = unscale(lastPoint->x);
+    //         pose.pose.position.y = unscale(lastPoint->y);
+    //         pose.pose.position.z = 0;
+    //         path.path.poses.push_back(pose);
+    //         lastPoint = &pt;
+    //     }
 
-        // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
-        geometry_msgs::msg::PoseStamped pose;
-        pose.header = header;
-        pose.pose.orientation = path.path.poses.back().pose.orientation;
-        pose.pose.position.x = unscale(lastPoint->x);
-        pose.pose.position.y = unscale(lastPoint->y);
-        pose.pose.position.z = 0;
-        path.path.poses.push_back(pose);
+    //     // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
+    //     geometry_msgs::msg::PoseStamped pose;
+    //     pose.header = header;
+    //     pose.pose.orientation = path.path.poses.back().pose.orientation;
+    //     pose.pose.position.x = unscale(lastPoint->x);
+    //     pose.pose.position.y = unscale(lastPoint->y);
+    //     pose.pose.position.z = 0;
+    //     path.path.poses.push_back(pose);
 
-        res->paths.push_back(path);
-    }
+    //     res->paths.push_back(path);
+    // }
 
     for (auto &group : obstacle_outlines)
     {
@@ -653,6 +676,60 @@ void CoveragePlanner::planPath(const std::shared_ptr<slic3r_coverage_planner::sr
         res->paths.push_back(path);
     }
 
+    for (int i = 0; i < fill_lines.size(); i++)
+    {
+        auto &line = fill_lines[i];
+        slic3r_coverage_planner::msg::Path path;
+        path.is_outline = false;
+        path.path.header = header;
+
+        line.remove_duplicate_points();
+
+        auto equally_spaced_points = line.equally_spaced_points(scale_(0.1));
+        if (equally_spaced_points.size() < 2)
+        {
+            RCLCPP_INFO(get_logger(), "Skipping single dot");
+            continue;
+        }
+        RCLCPP_INFO_STREAM(get_logger(), "Got " << equally_spaced_points.size() << " points");
+
+        Point *lastPoint = nullptr;
+        for (auto &pt : equally_spaced_points)
+        {
+            if (lastPoint == nullptr)
+            {
+                lastPoint = &pt;
+                continue;
+            }
+
+            // calculate pose for "lastPoint" pointing to current point
+
+            auto dir = pt - *lastPoint;
+            double orientation = atan2(dir.y, dir.x);
+            tf2::Quaternion q;
+            q.setRPY(0.0, 0.0, orientation);
+
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header = header;
+            pose.pose.orientation = tf2::toMsg(q);
+            pose.pose.position.x = unscale(lastPoint->x);
+            pose.pose.position.y = unscale(lastPoint->y);
+            pose.pose.position.z = 0;
+            path.path.poses.push_back(pose);
+            lastPoint = &pt;
+        }
+
+        // finally, we add the final pose for "lastPoint" with the same orientation as the last poe
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header = header;
+        pose.pose.orientation = path.path.poses.back().pose.orientation;
+        pose.pose.position.x = unscale(lastPoint->x);
+        pose.pose.position.y = unscale(lastPoint->y);
+        pose.pose.position.z = 0;
+        path.path.poses.push_back(pose);
+
+        res->paths.push_back(path);
+    }
     return;
 }
 

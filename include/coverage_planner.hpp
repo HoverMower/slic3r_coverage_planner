@@ -33,8 +33,8 @@ public:
     CoveragePlanner(std::string name);
 
     /// @brief method to handle parameter changes (i.e. by rqt)
-    /// @param parameters 
-    /// @return 
+    /// @param parameters
+    /// @return
     rcl_interfaces::msg::SetParametersResult parametersCallback(
         const std::vector<rclcpp::Parameter> &parameters);
 
@@ -54,15 +54,16 @@ private:
 
     void createLineMarkers(std::vector<Polygons> outline_groups, std::vector<Polygons> obstacle_groups, Polylines &fill_lines, visualization_msgs::msg::MarkerArray &markerArray);
     void traverse(std::vector<PerimeterGeneratorLoop> &contours, std::vector<Polygons> &line_groups);
+    void groupPolygons(std::vector<Polygons> &polygons, float distance_lines);
 
     /// @brief service to build a plan based on given polygonal area
     /// @param req request containing outer polygon and inner holes of area
     /// @param res result containing a array of Path messages
     void planPath(const std::shared_ptr<slic3r_coverage_planner::srv::PlanPath::Request> req,
-                                   std::shared_ptr<slic3r_coverage_planner::srv::PlanPath::Response> res);
+                  std::shared_ptr<slic3r_coverage_planner::srv::PlanPath::Response> res);
 
     /// @brief Parameter Callback handle
-    OnSetParametersCallbackHandle::SharedPtr callback_handle_;                                   
+    OnSetParametersCallbackHandle::SharedPtr callback_handle_;
 };
 
 #endif
